@@ -4,7 +4,7 @@ import librosa
 from PIL import Image
 from scipy.ndimage import laplace
 
-def process_dataset(f, sr=16000, n_mels=256, n_fft=1024, hop_length=32, duration=5):
+def process_dataset(f, sr=16000, n_mels=256, n_fft=1024, hop_length=64, duration=5):
     y, _ = librosa.load(f, sr=sr)
     target_length = sr * duration
     if len(y) < target_length:
@@ -19,7 +19,7 @@ def process_dataset(f, sr=16000, n_mels=256, n_fft=1024, hop_length=32, duration
         hop_length=hop_length,
         n_mels=n_mels
     )
-    log_S = librosa.power_to_db(S, ref=np.max, top_db=80)
+    log_S = librosa.power_to_db(S, ref=np.max, top_db = 80)
     S_norm = (log_S + 80) / 80
     return S_norm
 
@@ -32,6 +32,6 @@ for filename in sorted(os.listdir(audio_path)):
     lap = laplace(mel_spec)
     variance = np.var(lap)
     print("Laplacian variance:", variance)
-    im = (mel_spec * 255).astype(np.uint8)
+    im = (mel_spec * 255.0).astype(np.uint8)
     img = Image.fromarray(im)
     img.save(os.path.join(new_dataset_path, f"{filename[:-4]}.png"))
