@@ -1,163 +1,169 @@
-from keras.models import Model
-from keras.layers import Dense, Input, Conv2D, MaxPool2D, BatchNormalization, GlobalAveragePooling2D, Dropout
-from sklearn.model_selection import train_test_split
-import numpy as np
 import pandas as pd
+import tensorflow_hub as hub
+import tensorflow as tf
+import librosa
+import numpy as np
 import os
-from wandb.integration.keras import WandbMetricsLogger, WandbModelCheckpoint
+from sklearn.preprocessing import LabelEncoder
+from tensorflow.keras.utils import to_categorical
+from keras.layers import Input, Dense, Embedding, Flatten, Concatenate, Dropout
+from keras.models import Model
 import wandb
+from wandb.integration.keras import WandbMetricsLogger, WandbModelCheckpoint, WandbCallback
+from sklearn.model_selection import train_test_split
+from collections import Counter
 
-#wandb.login()
-cnn_summary = """
-Hierarchical Multi-Output CNN Architecture (Mel-Spectrogram Input)
 
-Input:
-- Shape: (64, 874, 1) — Mel-spectrogram of engine audio
+def extract_context_from_filename(filename):
+    name = filename.lower()
+    if "braking_state" in name:
+        return 1
+    elif "moving_state" in name:
+        return 2
+    elif "startup_state" in name:
+        return 3
+    elif "idle_state" in name:
+        return 4
+    else:
+        return 0
 
-Shared Convolutional Base:
-1. Conv2D(512, kernel=(4,4), padding='same', activation='relu') -> BatchNormalization -> MaxPool2D((2,2))
-2. Conv2D(256, kernel=(4,4), padding='same', activation='relu') -> BatchNormalization -> MaxPool2D((2,2))
-3. Conv2D(256, kernel=(4,4), padding='same', activation='relu') -> BatchNormalization -> MaxPool2D((2,2))
-4. GlobalAveragePooling2D()
-5. Dense(128, activation='relu') -> Dropout(0.4)
+def load_audio(path):
+    y, sr = librosa.load(path, sr=16000)   # YAMNet expects 16kHz
+    return y.astype(np.float32)
 
-Hierarchical Multi-Task Heads:
-- Primary state: Dense(128) -> Dropout(0.2) -> Dense(64) -> Dense(4, softmax)
-- Braking: Dense(64) -> Dense(2, softmax)
-- Idle: Dense(64) -> Dense(4, softmax)
-- Moving: Dense(64) -> Dense(2, softmax)
-- Startup: Dense(64) -> Dense(3, softmax)
-"""
-exper = wandb.init(project= "hierarchical_cnn", #identificador del proyecto
-                   name = "first_try", #nombre cuando creo el proyecto
-                   config= {#AQUI SE ESCRIBEN LOS PARAMETROS PERO NO SON LOS QUE VA A URILIZAR EL MODELO
-                            #SON LPS QUE NOSOTROS CARGAMOS COMO NOTAS
-                            "epochs": 50,
-                            "batch_size":32,
-                            "loss_function":"sparse_categorical_crossentropy",
-                            "arquitecture":cnn_summary,
-                            "Input":"876x64"
-                            })
-config = wandb.config
+def get_embedding(path):
+    waveform = load_audio(path)
+    # YAMNet wants a tensor 1D float32
+    waveform = tf.convert_to_tensor(waveform, dtype=tf.float32)
 
-wandb_callback = [WandbMetricsLogger(), #WandbMetricsLogger todas las metricas las manda a la pagina web obligatoria
-                  WandbModelCheckpoint(filepath = "model.keras", #Fichero que almacena se pone directorio
-                  monitor="val_loss",
-                  save_best_only=True) #Me guarda el mejor y solo uno cada vez que se actualice
-                  ]
+    scores, embeddings, spectrogram = yamnet(waveform)
+    embedding = tf.reduce_mean(embeddings, axis=0)  # (1024,)
+    return embedding.numpy()
 
-data = []
-for filename in os.listdir('mel_spectogram'):
-    spec = np.load('mel_spectogram/'+filename)
-    spec = np.expand_dims(spec, axis=-1)
-    data.append(spec)
-labels = pd.read_csv('metadata.csv')[['label', 'context']]
+wandb.login()
 
-(x_train, x_test, y_train, y_test) = train_test_split(np.array(data), labels, test_size=0.2, random_state=42, stratify=labels['context'])
-
-braking_map = {'normal_brakes':0, 'worn_out_brakes':1}
-idle_map = {'low_oil':0, 'normal_engine_idle':1, 'power_steering':2, 'serpentine_belt':3}
-moving_map = {'car_clean':0, 'car_knocking':1}
-startup_map = {'bad_ignition':0, 'dead_battery':1, 'normal_engine_startup':2}
-
-y_train_dict = {
-    'primary_state': y_train['context'].values,
-    'braking_substate': y_train['label'].map(braking_map).fillna(0).astype(np.int32).values,
-    'idle_substate': y_train['label'].map(idle_map).fillna(0).astype(np.int32).values,
-    'moving_substate': y_train['label'].map(moving_map).fillna(0).astype(np.int32).values,
-    'startup_substate': y_train['label'].map(startup_map).fillna(0).astype(np.int32).values,
-}
-
-weights = {
-    'primary_state': np.ones(len(y_train)),
-    'braking_substate': (y_train_dict['braking_substate'] != 0).astype(np.float64),
-    'idle_substate': (y_train_dict['idle_substate'] != 0).astype(np.float64),
-    'moving_substate': (y_train_dict['moving_substate'] != 0).astype(np.float64),
-    'startup_substate': (y_train_dict['startup_substate'] != 0).astype(np.float64),
-}
-
-y_train_list = [
-    y_train_dict['primary_state'],
-    y_train_dict['braking_substate'],
-    y_train_dict['idle_substate'],
-    y_train_dict['moving_substate'],
-    y_train_dict['startup_substate'],
-]
-
-weights_list = [
-    weights['primary_state'],
-    weights['braking_substate'],
-    weights['idle_substate'],
-    weights['moving_substate'],
-    weights['startup_substate'],
-]
-
-input = Input(shape=(64,876,1))
-x = Conv2D(64, kernel_size=(4,4), padding = 'same', activation='relu')(input)
-x = BatchNormalization()(x)
-x = MaxPool2D((2,2))(x)
-
-x = Conv2D(128, kernel_size=(4,4), padding = 'same', activation='relu')(x)
-x = BatchNormalization()(x)
-x = MaxPool2D((2,2))(x)
-
-x = Conv2D(256, kernel_size=(4,4), padding = 'same', activation='relu')(x)
-x = BatchNormalization()(x)
-x = MaxPool2D((2,2))(x)
-
-x = GlobalAveragePooling2D()(x)
-x = Dense(128, activation='relu')(x)
-
-# Identifiable head
-primary_state = Dropout(0.2, name='primary_dropout')(x)
-primary_state = Dense(64, activation='relu', name='primary_dense2')(primary_state)
-primary_output = Dense(4, activation='softmax', name='primary_state')(primary_state)
-
-# Braking head
-braking_features = Dropout(0.4, name='braking_dropout')(x)
-braking_features = Dense(64, activation='relu', name='braking_features')(braking_features)
-braking_output = Dense(2, activation='softmax', name='braking_substate')(braking_features)
-
-# Idle head
-idle_features = Dropout(0.3, name='idle_dropout')(x)
-idle_features = Dense(64, activation='relu', name='idle_features')(idle_features)
-idle_output = Dense(4, activation='softmax', name='idle_substate')(idle_features)
-
-# Moving head
-moving_features = Dropout(0.2, name='moving_dropout')(x)
-moving_features = Dense(64, activation='relu', name='moving_features')(moving_features)
-moving_output = Dense(2, activation='softmax', name='moving_substate')(moving_features)
-
-# Startup head
-startup_features = Dropout(0.2, name='startup_dropout')(x)
-startup_features = Dense(64, activation='relu', name='startup_features')(startup_features)
-startup_output = Dense(3, activation='softmax', name='startup_substate')(startup_features)
-
-model = Model(inputs=input, outputs=[primary_output, braking_output, idle_output, moving_output, startup_output])
-model.compile(
-    optimizer='adam',
-    loss={
-        'primary_state': 'sparse_categorical_crossentropy',
-        'braking_substate': 'sparse_categorical_crossentropy',
-        'idle_substate': 'sparse_categorical_crossentropy',
-        'moving_substate': 'sparse_categorical_crossentropy',
-        'startup_substate': 'sparse_categorical_crossentropy',
-    },
-    metrics={
-        'primary_state': ['accuracy'],
-        'braking_substate': ['accuracy'],
-        'idle_substate': ['accuracy'],
-        'moving_substate': ['accuracy'],
-        'startup_substate': ['accuracy'],
+exper = wandb.init(project="car_fault_detection",
+                   name="yamnet_v2",
+                   config={
+                        "epochs": 30,
+                        "batch_size": 32,
+                        "model": "YAMNet+MLP",
+                        "context_embedding_dim": 4,
+                        "dense_units": [256, 128]
     }
 )
 
-resumen = model.fit(
-    x_train,
-    y_train_list,
-    epochs=50,
-    batch_size=16,
-    validation_split=0.1,
-    sample_weight=weights_list
+config = wandb.config
+
+wandb_callback = [WandbMetricsLogger(), WandbModelCheckpoint(filepath='model.keras', monitor='val_loss', save_best_only=True)]
+
+#DATA_PATH = "/content/drive/MyDrive/project_samsung_IA/"
+
+df = pd.read_csv("metadata.csv")
+df["context"] = df["file"].apply(extract_context_from_filename)
+yamnet = hub.load("https://tfhub.dev/google/yamnet/1")
+print("YAMNet loaded")
+
+test_path = os.path.join("audio", df.iloc[0]["file"])
+emb = get_embedding(test_path)
+
+X_audio = []
+X_context = []
+y = []
+
+for _, row in df.iterrows():
+    filepath = os.path.join("audio", row["file"])
+
+    emb = get_embedding(filepath)  # 1024-d vector
+
+    X_audio.append(emb)
+    X_context.append(int(row["context"]))
+    y.append(row["label"])
+
+X_audio = np.array(X_audio)
+X_context = np.array(X_context)
+y = np.array(y)
+
+counter = Counter(y)
+max_count = max(counter.values())
+
+X_audio_new = []
+X_context_new = []
+y_new = []
+
+for cls in counter:
+    # get indices of this class
+    idx = np.where(y == cls)[0]
+    n_repeat = max_count // len(idx)
+    n_extra = max_count % len(idx)
+
+    # repeat full features
+    X_audio_new.append(np.repeat(X_audio[idx], n_repeat, axis=0))
+    X_context_new.append(np.repeat(X_context[idx], n_repeat, axis=0))
+    y_new.append(np.repeat(y[idx], n_repeat, axis=0))
+
+    # add remaining to reach max_count
+    if n_extra > 0:
+        extra_idx = np.random.choice(idx, size=n_extra, replace=False)
+        X_audio_new.append(X_audio[extra_idx])
+        X_context_new.append(X_context[extra_idx])
+        y_new.append(y[extra_idx])
+
+
+X_audio_bal = np.vstack(X_audio_new)
+X_context_bal = np.concatenate(X_context_new)
+y_bal = np.concatenate(y_new)
+
+le = LabelEncoder()
+y_int = le.fit_transform(y_bal)
+y_cat = to_categorical(y_int)
+
+X_audio_train, X_audio_test, X_context_train, X_context_test, y_train, y_test = train_test_split(
+    X_audio_bal,
+    X_context_bal,
+    y_cat,        # one-hot labels
+    test_size=0.2,
+    stratify=y_int,   # MUY IMPORTANTE
+    random_state=42
+)
+
+y_test_int = np.argmax(y_test, axis=1)
+
+# Inputs
+inp_audio = Input(shape=(1024,), name="audio_embedding")
+inp_context = Input(shape=(1,), dtype="int32", name="context_id")
+
+# Context embedding
+ctx_emb = Embedding(input_dim=5, output_dim=4, name="context_embedding")(inp_context)
+ctx_emb = Flatten()(ctx_emb)
+
+# Combine audio + context
+x = Concatenate()([inp_audio, ctx_emb])
+
+# Dense layers
+x = Dense(128, activation="relu")(x)
+x = Dropout(0.5)(x)
+x = Dense(64, activation="relu")(x)
+
+# Output layer
+out = Dense(len(le.classes_), activation="softmax", name="output")(x)
+
+# Build model
+model = Model(inputs=[inp_audio, inp_context], outputs=out)
+
+# Compile
+model.compile(
+    optimizer="adam",
+    loss="categorical_crossentropy",
+    metrics=["accuracy"]
+)
+# model.summary()
+history = model.fit(
+    [X_audio_train, X_context_train],
+    y_train,
+    validation_split=0.2,
+    batch_size=config.batch_size,
+    callbacks=wandb_callback,
+    epochs=config.epochs
 )
 exper.finish()
