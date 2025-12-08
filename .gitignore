@@ -1,5 +1,4 @@
 *.wav
 *.npy
 *.csv
-*.ipynb
 __pycache__/
