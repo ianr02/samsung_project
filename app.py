@@ -114,7 +114,7 @@ def generate_message_json(top1_problem, top1_prob, top2_problem=None, top2_prob=
 # ------------------------------------------------------------
 @st.cache_resource
 def load_audio_model():
-    return tf.keras.models.load_model("yamnet_model.keras")  # CHANGE NAME
+    return tf.keras.models.load_model("yamnet_model.keras")
 
 @st.cache_resource
 def load_label_encoder():
