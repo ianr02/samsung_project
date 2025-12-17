@@ -2,7 +2,7 @@
 
 ## Project Description
 
-**Audio Diagnostic AI** is a machine learning project designed to automatically detect and classify engine and mechanical faults based on audio recordings from vehicles.  
+**Audio Diagnostic AI** is an AI project designed to automatically detect and classify engine and mechanical faults based on audio recordings from vehicles.  
 
 The main goal of the project is to help mechanics and technicians identify issues quickly and accurately by analyzing engine sounds, vibrations, and other mechanical noises. Instead of relying on manual inspection or intuition, this system uses audio feature extraction and deep learning models to pinpoint specific problems.  
 
