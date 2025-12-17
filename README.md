@@ -34,7 +34,8 @@ This project relies on the following Python libraries and frameworks:
 - **[NumPy](https://numpy.org/)** – numerical operations and array management  
 - **[Pandas](https://pandas.pydata.org/)** – data manipulation and analysis  
 - **[Groq](https://www.groq.com/)** - for LLM models
-- **[Streamlit](https://streamlit.io/)** – building interactive web apps for diagnostics  
+- **[Streamlit](https://streamlit.io/)** – building interactive web apps for diagnostics
+- **[Librosa](https://librosa.org/)** – audio analysis
 
 
 
