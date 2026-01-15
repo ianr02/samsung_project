@@ -41,4 +41,9 @@ This project relies on the following Python libraries and frameworks:
 
 This project bridges the gap between complex automotive diagnostics and everyday drivers, offering an **intelligent and accessible tool** for vehicle maintenance awareness.
 
+## 👥 Collaborators
+
+- **Ariel**
+- **Santiago Font** — GitHub: [@santifonttt](https://github.com/santifonttt)
+- **Ian Renderos** — GitHub: [@ianr02](https://github.com/ianr02)
 
