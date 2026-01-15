@@ -43,7 +43,10 @@ This project bridges the gap between complex automotive diagnostics and everyday
 
 ## 👥 Collaborators
 
-- **Ariel**
+## 👥 Collaborators
+
+- **Ariel** — GitHub: [@ARR-8303-0001](https://github.com/ARR-8303-0001)
 - **Santiago Font** — GitHub: [@santifonttt](https://github.com/santifonttt)
 - **Ian Renderos** — GitHub: [@ianr02](https://github.com/ianr02)
+
 
